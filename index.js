@@ -41,8 +41,7 @@ async function connectDb() {
 // --- Schemas ---
 const userSchema = new mongoose.Schema(
   {
-    email: { type: String, unique: true, required: true },
-    username: { type: String, unique: true, sparse: true },
+    phone: { type: String, unique: true, required: true },
     name: { type: String },
     password: { type: String, required: true },
   },
@@ -65,7 +64,7 @@ const Cv = mongoose.model('Cv', cvSchema)
 
 // --- Helpers ---
 function signToken(user) {
-  return jwt.sign({ sub: user._id.toString(), email: user.email }, jwtSecret, { expiresIn: '7d' })
+  return jwt.sign({ sub: user._id.toString(), phone: user.phone }, jwtSecret, { expiresIn: '7d' })
 }
 
 async function auth(req, res, next) {
@@ -87,23 +86,22 @@ app.get('/', (_req, res) => {
 })
 
 app.post('/api/auth/signup', async (req, res) => {
-  const { email, password, name } = req.body || {}
-  if (!email || !password || password.length < 6) {
-    return res.status(400).json({ error: 'Email and password (>=6 chars) are required.' })
+  const { phone, password, name } = req.body || {}
+  if (!phone || !password || password.length < 6) {
+    return res.status(400).json({ error: 'Phone number and password (>=6 chars) are required.' })
   }
-  const emailLower = email.toLowerCase()
-  const exists = await User.findOne({ email: emailLower }).lean()
+  const normalizedPhone = phone.trim()
+  const exists = await User.findOne({ phone: normalizedPhone }).lean()
   if (exists) return res.status(409).json({ error: 'User already exists' })
   const hash = await bcrypt.hash(password, 10)
   try {
     const user = await User.create({
-      email: emailLower,
-      username: emailLower,
-      name: name || email.split('@')[0],
+      phone: normalizedPhone,
+      name: name || normalizedPhone,
       password: hash,
     })
     const token = signToken(user)
-    return res.json({ token, user: { id: user._id, email: user.email, name: user.name } })
+    return res.json({ token, user: { id: user._id, phone: user.phone, name: user.name } })
   } catch (err) {
     if (err?.code === 11000) {
       return res.status(409).json({ error: 'User already exists' })
@@ -114,20 +112,21 @@ app.post('/api/auth/signup', async (req, res) => {
 })
 
 app.post('/api/auth/login', async (req, res) => {
-  const { email, password } = req.body || {}
-  if (!email || !password) return res.status(400).json({ error: 'Email and password required.' })
-  const user = await User.findOne({ email: email.toLowerCase() })
+  const { phone, password } = req.body || {}
+  if (!phone || !password) return res.status(400).json({ error: 'Phone number and password are required.' })
+  const normalizedPhone = phone.trim()
+  const user = await User.findOne({ phone: normalizedPhone })
   if (!user) return res.status(401).json({ error: 'Invalid credentials' })
   const ok = await bcrypt.compare(password, user.password)
   if (!ok) return res.status(401).json({ error: 'Invalid credentials' })
   const token = signToken(user)
-  return res.json({ token, user: { id: user._id, email: user.email, name: user.name } })
+  return res.json({ token, user: { id: user._id, phone: user.phone, name: user.name } })
 })
 
 app.get('/api/auth/me', auth, async (req, res) => {
   const user = await User.findById(req.user.sub).lean()
   if (!user) return res.status(404).json({ error: 'User not found' })
-  return res.json({ user: { id: user._id, email: user.email, name: user.name } })
+  return res.json({ user: { id: user._id, phone: user.phone, name: user.name } })
 })
 
 app.get('/api/cv', auth, async (req, res) => {
