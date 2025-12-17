@@ -24,19 +24,35 @@ app.options('*', cors(corsOptions))
 app.use(express.json())
 
 // --- DB connection ---
+let dbConnected = false
+
 async function connectDb() {
   if (!dbUrl) {
     console.warn('[db] DATABASE_URL is missing; API will fail without a DB.')
-    return
+    return false
   }
+  
+  // Reuse existing connection if available
+  if (mongoose.connection.readyState === 1) {
+    return true
+  }
+  
   try {
     await mongoose.connect(dbUrl)
+    dbConnected = true
     console.log('[db] connected')
+    return true
   } catch (err) {
     console.error('[db] connection error', err)
-    process.exit(1)
+    dbConnected = false
+    return false
   }
 }
+
+// Connect to DB on startup (non-blocking)
+connectDb().catch(err => {
+  console.error('[db] Initial connection failed:', err)
+})
 
 // --- Schemas ---
 const userSchema = new mongoose.Schema(
@@ -88,6 +104,32 @@ async function auth(req, res, next) {
     return res.status(401).json({ error: 'Invalid token' })
   }
 }
+
+// Health check endpoint (before DB middleware)
+app.get('/api/health', (_req, res) => {
+  res.json({ 
+    status: 'ok', 
+    db: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    timestamp: new Date().toISOString()
+  })
+})
+
+// Middleware to ensure DB connection before handling requests (except health check)
+app.use(async (req, res, next) => {
+  // Skip DB check for health check and root endpoint
+  if (req.path === '/' || req.path === '/api/health') {
+    return next()
+  }
+  
+  // Try to connect if not connected
+  if (!dbConnected && mongoose.connection.readyState !== 1) {
+    const connected = await connectDb()
+    if (!connected && dbUrl) {
+      return res.status(503).json({ error: 'Database connection unavailable' })
+    }
+  }
+  next()
+})
 
 // --- Routes ---
 app.get('/', (_req, res) => {
@@ -192,11 +234,8 @@ app.use((_req, res) => {
 // Error handler
 app.use((err, _req, res, _next) => {
   console.error(err.stack)
-  res.status(500).send('Something broke!')
+  res.status(500).json({ error: 'Internal server error', message: err.message })
 })
 
-connectDb().then(() => {
-  app.listen(port, () => {
-    console.log(`App is listening on port ${port}`)
-  })
-})
+// Export for Vercel serverless
+module.exports = app
