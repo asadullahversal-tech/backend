@@ -63,6 +63,15 @@ const User = mongoose.model('User', userSchema)
 const Cv = mongoose.model('Cv', cvSchema)
 
 // --- Helpers ---
+function normalizePhone(phone) {
+  if (!phone) return ''
+  // Remove spaces and dashes, keep leading + if present
+  const trimmed = phone.trim()
+  const hasPlus = trimmed.startsWith('+')
+  const digits = trimmed.replace(/[^\d]/g, '')
+  return hasPlus ? `+${digits}` : digits
+}
+
 function signToken(user) {
   return jwt.sign({ sub: user._id.toString(), phone: user.phone }, jwtSecret, { expiresIn: '7d' })
 }
@@ -90,7 +99,7 @@ app.post('/api/auth/signup', async (req, res) => {
   if (!phone || !password || password.length < 6) {
     return res.status(400).json({ error: 'Phone number and password (>=6 chars) are required.' })
   }
-  const normalizedPhone = phone.trim()
+  const normalizedPhone = normalizePhone(phone)
   const exists = await User.findOne({ phone: normalizedPhone }).lean()
   if (exists) return res.status(409).json({ error: 'User already exists' })
   const hash = await bcrypt.hash(password, 10)
@@ -114,11 +123,11 @@ app.post('/api/auth/signup', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   const { phone, password } = req.body || {}
   if (!phone || !password) return res.status(400).json({ error: 'Phone number and password are required.' })
-  const normalizedPhone = phone.trim()
+  const normalizedPhone = normalizePhone(phone)
   const user = await User.findOne({ phone: normalizedPhone })
-  if (!user) return res.status(401).json({ error: 'Invalid credentials' })
+  if (!user) return res.status(401).json({ error: 'Invalid phone or password' })
   const ok = await bcrypt.compare(password, user.password)
-  if (!ok) return res.status(401).json({ error: 'Invalid credentials' })
+  if (!ok) return res.status(401).json({ error: 'Invalid phone or password' })
   const token = signToken(user)
   return res.json({ token, user: { id: user._id, phone: user.phone, name: user.name } })
 })
@@ -161,6 +170,19 @@ app.post('/api/cv', auth, async (req, res) => {
   }
   return res.json({ cv })
 })
+
+// ⚠️ Dev-only helper to clear all users (for local testing only)
+if (process.env.NODE_ENV !== 'production') {
+  app.post('/api/debug/clear-users', async (_req, res) => {
+    try {
+      await User.deleteMany({})
+      return res.json({ ok: true })
+    } catch (err) {
+      console.error('[debug] clear-users error', err)
+      return res.status(500).json({ error: 'Failed to clear users' })
+    }
+  })
+}
 
 // 404 handler
 app.use((_req, res) => {
