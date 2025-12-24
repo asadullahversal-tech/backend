@@ -10,7 +10,7 @@ dotenv.config()
 const app = express()
 const port = process.env.PORT || 8080
 const jwtSecret = process.env.JWT_SECRET || process.env.ACCESS_TOKEN_SECRET || 'change-me'
-const dbUrl = process.env.DATABASE_URL
+const dbUrl = "mongodb+srv://andukamarlony_db_user:4QMlMiSbaVgGOI0v@cluster0.m4tjofp.mongodb.net/"
 
 const corsOptions = {
   origin: true, // Allow all origins
@@ -38,12 +38,31 @@ async function connectDb() {
   }
   
   try {
-    await mongoose.connect(dbUrl)
+    // Add connection options for better error handling
+    await mongoose.connect(dbUrl, {
+      serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
+      retryWrites: true,
+    })
     dbConnected = true
-    console.log('[db] connected')
+    console.log('[db] connected successfully')
     return true
   } catch (err) {
-    console.error('[db] connection error', err)
+    console.error('[db] connection error:', err.message)
+    
+    // Provide helpful error messages
+    if (err.message.includes('Authentication failed') || err.code === 8000) {
+      console.error('[db] AUTH ERROR: Check your MongoDB credentials:')
+      console.error('  1. Verify username and password in DATABASE_URL')
+      console.error('  2. URL-encode special characters in password (!@#$%^&* etc.)')
+      console.error('  3. Check MongoDB Atlas Network Access - whitelist your IP (0.0.0.0/0 for all)')
+      console.error('  4. Verify database user has correct permissions')
+    } else if (err.message.includes('ENOTFOUND') || err.message.includes('getaddrinfo')) {
+      console.error('[db] NETWORK ERROR: Cannot reach MongoDB server')
+      console.error('  Check your DATABASE_URL hostname')
+    } else {
+      console.error('[db] Connection failed:', err.message)
+    }
+    
     dbConnected = false
     return false
   }
