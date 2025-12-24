@@ -12,21 +12,20 @@ const port = process.env.PORT || 8080
 const jwtSecret = process.env.JWT_SECRET || process.env.ACCESS_TOKEN_SECRET || 'change-me'
 const dbUrl = "mongodb+srv://andukamarlony_db_user:4QMlMiSbaVgGOI0v@cluster0.m4tjofp.mongodb.net/"
 
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow all origins
-    callback(null, true)
-  },
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  credentials: true,
-  preflightContinue: false,
-  optionsSuccessStatus: 204
-}
+// CORS - Allow all origins explicitly
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*')
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization')
+  res.header('Access-Control-Expose-Headers', 'Authorization')
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200)
+  }
+  next()
+})
 
-// Apply CORS to all routes
-app.use(cors(corsOptions))
-app.options('*', cors(corsOptions))
 app.use(express.json())
 
 // --- DB connection ---
