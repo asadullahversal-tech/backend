@@ -13,12 +13,18 @@ const jwtSecret = process.env.JWT_SECRET || process.env.ACCESS_TOKEN_SECRET || '
 const dbUrl = "mongodb+srv://andukamarlony_db_user:4QMlMiSbaVgGOI0v@cluster0.m4tjofp.mongodb.net/"
 
 const corsOptions = {
-  origin: true, // Allow all origins
+  origin: function (origin, callback) {
+    // Allow all origins
+    callback(null, true)
+  },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   credentials: true,
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 }
 
+// Apply CORS to all routes
 app.use(cors(corsOptions))
 app.options('*', cors(corsOptions))
 app.use(express.json())
