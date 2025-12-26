@@ -301,12 +301,20 @@ app.post('/api/payments/create', auth, async (req, res) => {
       status: 'pending'
     })
 
+    // Normalize phone number to MSISDN format (remove spaces, ensure + prefix)
+    let normalizedPhone = phone.replace(/\s+/g, '').trim()
+    if (!normalizedPhone.startsWith('+')) {
+      normalizedPhone = '+' + normalizedPhone
+    }
+    
     // Call PawaPay API to create payment
-    const pawapayResponse = await fetch(`${PAWAPAY_API_URL}/deposits`, {
+    // Using /paymentpage endpoint as per PawaPay docs
+    const pawapayResponse = await fetch(`${PAWAPAY_API_URL}/paymentpage`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${PAWAPAY_API_TOKEN}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
       },
       body: JSON.stringify({
         amount: {
@@ -314,7 +322,7 @@ app.post('/api/payments/create', auth, async (req, res) => {
           currency: 'USD'
         },
         customer: {
-          phoneNumber: phone,
+          phoneNumber: normalizedPhone,
           email: req.user.email || `${req.user.phone}@example.com`
         },
         merchantReference: payment._id.toString(),
@@ -325,11 +333,19 @@ app.post('/api/payments/create', auth, async (req, res) => {
 
     if (!pawapayResponse.ok) {
       const errorData = await pawapayResponse.json().catch(() => ({}))
-      console.error('[PawaPay] Error:', errorData)
+      const errorText = await pawapayResponse.text().catch(() => '')
+      console.error('[PawaPay] Error Response:', {
+        status: pawapayResponse.status,
+        statusText: pawapayResponse.statusText,
+        errorData,
+        errorText,
+        url: `${PAWAPAY_API_URL}/paymentpage`
+      })
       await Payment.findByIdAndUpdate(payment._id, { status: 'failed' })
-      return res.status(500).json({ 
+      return res.status(pawapayResponse.status || 500).json({ 
         error: 'Payment initiation failed', 
-        details: errorData 
+        details: errorData,
+        message: errorData.errorMessage || errorData.error || 'PawaPay API error'
       })
     }
 
