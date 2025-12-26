@@ -99,8 +99,25 @@ const cvSchema = new mongoose.Schema(
   { timestamps: true }
 )
 
+const paymentSchema = new mongoose.Schema(
+  {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    plan: { type: String, required: true },
+    amount: { type: Number, required: true },
+    currency: { type: String, default: 'USD' },
+    phone: { type: String, required: true },
+    provider: { type: String },
+    depositId: { type: String }, // PawaPay deposit ID
+    status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
+    paidAt: { type: Date },
+    reference: { type: String },
+  },
+  { timestamps: true }
+)
+
 const User = mongoose.model('User', userSchema)
 const Cv = mongoose.model('Cv', cvSchema)
+const Payment = mongoose.model('Payment', paymentSchema)
 
 // --- Helpers ---
 function normalizePhone(phone) {
@@ -215,9 +232,32 @@ app.get('/api/cv/:id', auth, async (req, res) => {
   return res.json({ cv })
 })
 
+// Check if user has paid for the plan
+async function hasPaidForPlan(userId, plan) {
+  const payment = await Payment.findOne({
+    userId,
+    plan,
+    status: 'completed'
+  }).lean()
+  return !!payment
+}
+
 app.post('/api/cv', auth, async (req, res) => {
   const { id, data, withPhoto, plan, title } = req.body || {}
   if (!data) return res.status(400).json({ error: 'CV data is required' })
+  
+  // Check if user has paid for this plan (only for new CVs)
+  if (!id) {
+    const paid = await hasPaidForPlan(req.user.sub, plan || 'student')
+    if (!paid) {
+      return res.status(402).json({ 
+        error: 'Payment required', 
+        message: 'You must complete payment before creating a CV',
+        requiresPayment: true 
+      })
+    }
+  }
+  
   let cv
   if (id) {
     cv = await Cv.findOneAndUpdate(
@@ -235,6 +275,163 @@ app.post('/api/cv', auth, async (req, res) => {
     })
   }
   return res.json({ cv })
+})
+
+// PawaPay API configuration
+const PAWAPAY_API_TOKEN = "eyJraWQiOiIxIiwiYWxnIjoiRVMyNTYifQ.eyJ0dCI6IkFBVCIsInN1YiI6IjE4NzUiLCJtYXYiOiIxIiwiZXhwIjoyMDgyMjkzMzU3LCJpYXQiOjE3NjY3NjA1NTcsInBtIjoiREFGLFBBRiIsImp0aSI6IjhjZmVhMWIwLWU1YzctNGQ3Mi1iYzVmLWRmMTNmYTVmMWU5MCJ9.OINT4nV0qzCQ6_iTXxybOEf_uGyhyt-cphbmSRYsI66OPP5vHI_UCmqw2CuJuMvJQmpdnU3DN0-R4XPc53Z2Fg"
+const PAWAPAY_API_URL = "https://api.sandbox.pawapay.io" // Use sandbox for testing
+
+// Create payment request
+app.post('/api/payments/create', auth, async (req, res) => {
+  const { plan, amount, phone, provider } = req.body || {}
+  
+  if (!plan || !amount || !phone) {
+    return res.status(400).json({ error: 'Plan, amount, and phone are required' })
+  }
+
+  try {
+    // Create payment record
+    const payment = await Payment.create({
+      userId: req.user.sub,
+      plan,
+      amount,
+      currency: 'USD',
+      phone,
+      provider: provider || 'mtn',
+      status: 'pending'
+    })
+
+    // Call PawaPay API to create payment
+    const pawapayResponse = await fetch(`${PAWAPAY_API_URL}/deposits`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${PAWAPAY_API_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        amount: {
+          amount: amount.toString(),
+          currency: 'USD'
+        },
+        customer: {
+          phoneNumber: phone,
+          email: req.user.email || `${req.user.phone}@example.com`
+        },
+        merchantReference: payment._id.toString(),
+        callbackUrl: `${process.env.BACKEND_URL || 'https://backend-topaz-nine-29.vercel.app'}/api/payments/callback`,
+        returnUrl: `${process.env.FRONTEND_URL || 'https://ethane-chi.vercel.app'}/?payment=success&depositId={depositId}`
+      })
+    })
+
+    if (!pawapayResponse.ok) {
+      const errorData = await pawapayResponse.json().catch(() => ({}))
+      console.error('[PawaPay] Error:', errorData)
+      await Payment.findByIdAndUpdate(payment._id, { status: 'failed' })
+      return res.status(500).json({ 
+        error: 'Payment initiation failed', 
+        details: errorData 
+      })
+    }
+
+    const pawapayData = await pawapayResponse.json()
+    
+    // Update payment with deposit ID
+    await Payment.findByIdAndUpdate(payment._id, {
+      depositId: pawapayData.depositId,
+      reference: pawapayData.merchantReference
+    })
+
+    return res.json({
+      paymentId: payment._id,
+      depositId: pawapayData.depositId,
+      redirectUrl: pawapayData.redirectUrl || pawapayData.paymentUrl,
+      status: 'pending'
+    })
+  } catch (err) {
+    console.error('[Payment] Error:', err)
+    return res.status(500).json({ error: 'Payment creation failed', message: err.message })
+  }
+})
+
+// Verify payment status
+app.get('/api/payments/status/:depositId', auth, async (req, res) => {
+  const { depositId } = req.params
+  
+  try {
+    // Check PawaPay API for payment status
+    const pawapayResponse = await fetch(`${PAWAPAY_API_URL}/deposits/${depositId}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${PAWAPAY_API_TOKEN}`,
+        'Content-Type': 'application/json'
+      }
+    })
+
+    if (!pawapayResponse.ok) {
+      return res.status(404).json({ error: 'Payment not found' })
+    }
+
+    const pawapayData = await pawapayResponse.json()
+    
+    // Update payment status in database
+    const payment = await Payment.findOneAndUpdate(
+      { depositId, userId: req.user.sub },
+      {
+        status: pawapayData.status === 'COMPLETED' ? 'completed' : 
+                pawapayData.status === 'FAILED' ? 'failed' : 'pending',
+        paidAt: pawapayData.status === 'COMPLETED' ? new Date() : undefined
+      },
+      { new: true }
+    )
+
+    if (!payment) {
+      return res.status(404).json({ error: 'Payment record not found' })
+    }
+
+    return res.json({
+      paymentId: payment._id,
+      depositId: payment.depositId,
+      status: payment.status,
+      plan: payment.plan,
+      amount: payment.amount,
+      paidAt: payment.paidAt
+    })
+  } catch (err) {
+    console.error('[Payment Status] Error:', err)
+    return res.status(500).json({ error: 'Failed to check payment status', message: err.message })
+  }
+})
+
+// PawaPay webhook callback
+app.post('/api/payments/callback', async (req, res) => {
+  const { depositId, status, merchantReference } = req.body || {}
+  
+  try {
+    const payment = await Payment.findById(merchantReference)
+    if (!payment) {
+      return res.status(404).json({ error: 'Payment not found' })
+    }
+
+    const paymentStatus = status === 'COMPLETED' ? 'completed' : 
+                         status === 'FAILED' ? 'failed' : 'pending'
+    
+    await Payment.findByIdAndUpdate(payment._id, {
+      status: paymentStatus,
+      paidAt: paymentStatus === 'completed' ? new Date() : undefined
+    })
+
+    return res.json({ success: true })
+  } catch (err) {
+    console.error('[Payment Callback] Error:', err)
+    return res.status(500).json({ error: 'Callback processing failed' })
+  }
+})
+
+// Check if user has paid
+app.get('/api/payments/check/:plan', auth, async (req, res) => {
+  const { plan } = req.params
+  const paid = await hasPaidForPlan(req.user.sub, plan)
+  return res.json({ paid })
 })
 
 // ⚠️ Dev-only helper to clear all users (for local testing only)
