@@ -307,45 +307,71 @@ app.post('/api/payments/create', auth, async (req, res) => {
       normalizedPhone = '+' + normalizedPhone
     }
     
-    // Call PawaPay API to create payment
-    // Using /paymentpage endpoint as per PawaPay docs
-    const pawapayResponse = await fetch(`${PAWAPAY_API_URL}/paymentpage`, {
+    // Prepare PawaPay request payload
+    const pawapayPayload = {
+      amount: {
+        amount: amount.toString(),
+        currency: 'USD'
+      },
+      customer: {
+        phoneNumber: normalizedPhone
+      },
+      merchantReference: payment._id.toString(),
+      callbackUrl: `${process.env.BACKEND_URL || 'https://backend-topaz-nine-29.vercel.app'}/api/payments/callback`,
+      returnUrl: `${process.env.FRONTEND_URL || 'https://ethane-chi.vercel.app'}/?payment=success&depositId={depositId}`
+    }
+    
+    // Add email if available
+    if (req.user.email) {
+      pawapayPayload.customer.email = req.user.email
+    }
+    
+    console.log('[PawaPay] Request:', {
+      url: `${PAWAPAY_API_URL}/deposits`,
+      payload: pawapayPayload
+    })
+    
+    // Call PawaPay API to create payment - try /deposits endpoint
+    const pawapayResponse = await fetch(`${PAWAPAY_API_URL}/deposits`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${PAWAPAY_API_TOKEN}`,
         'Content-Type': 'application/json',
         'Accept': 'application/json'
       },
-      body: JSON.stringify({
-        amount: {
-          amount: amount.toString(),
-          currency: 'USD'
-        },
-        customer: {
-          phoneNumber: normalizedPhone,
-          email: req.user.email || `${req.user.phone}@example.com`
-        },
-        merchantReference: payment._id.toString(),
-        callbackUrl: `${process.env.BACKEND_URL || 'https://backend-topaz-nine-29.vercel.app'}/api/payments/callback`,
-        returnUrl: `${process.env.FRONTEND_URL || 'https://ethane-chi.vercel.app'}/?payment=success&depositId={depositId}`
-      })
+      body: JSON.stringify(pawapayPayload)
     })
 
     if (!pawapayResponse.ok) {
-      const errorData = await pawapayResponse.json().catch(() => ({}))
-      const errorText = await pawapayResponse.text().catch(() => '')
+      let errorData = {}
+      let errorText = ''
+      try {
+        errorText = await pawapayResponse.text()
+        errorData = JSON.parse(errorText)
+      } catch (e) {
+        errorData = { error: errorText || 'Unknown error' }
+      }
+      
       console.error('[PawaPay] Error Response:', {
         status: pawapayResponse.status,
         statusText: pawapayResponse.statusText,
         errorData,
         errorText,
-        url: `${PAWAPAY_API_URL}/paymentpage`
+        url: `${PAWAPAY_API_URL}/deposits`,
+        headers: Object.fromEntries(pawapayResponse.headers.entries())
       })
+      
       await Payment.findByIdAndUpdate(payment._id, { status: 'failed' })
+      
+      const errorMessage = errorData.failureReason?.failureMessage || 
+                          errorData.errorMessage || 
+                          errorData.error || 
+                          'PawaPay API error'
+      
       return res.status(pawapayResponse.status || 500).json({ 
         error: 'Payment initiation failed', 
         details: errorData,
-        message: errorData.errorMessage || errorData.error || 'PawaPay API error'
+        message: errorMessage
       })
     }
 
