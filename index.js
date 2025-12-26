@@ -326,12 +326,16 @@ app.post('/api/payments/create', auth, async (req, res) => {
       pawapayPayload.customer.email = req.user.email
     }
     
+    // Log request details (without full token for security)
     console.log('[PawaPay] Request:', {
       url: `${PAWAPAY_API_URL}/deposits`,
-      payload: pawapayPayload
+      payload: pawapayPayload,
+      tokenPrefix: PAWAPAY_API_TOKEN.substring(0, 20) + '...',
+      tokenLength: PAWAPAY_API_TOKEN.length
     })
     
-    // Call PawaPay API to create payment - try /deposits endpoint
+    // Call PawaPay API to create payment
+    // Note: Make sure the token is valid and has proper permissions in PawaPay dashboard
     const pawapayResponse = await fetch(`${PAWAPAY_API_URL}/deposits`, {
       method: 'POST',
       headers: {
@@ -341,6 +345,9 @@ app.post('/api/payments/create', auth, async (req, res) => {
       },
       body: JSON.stringify(pawapayPayload)
     })
+    
+    // Log response status immediately
+    console.log('[PawaPay] Response Status:', pawapayResponse.status, pawapayResponse.statusText)
 
     if (!pawapayResponse.ok) {
       let errorData = {}
