@@ -12,17 +12,21 @@ const port = process.env.PORT || 8080
 const jwtSecret = process.env.JWT_SECRET || process.env.ACCESS_TOKEN_SECRET || 'change-me'
 const dbUrl = "mongodb+srv://andukamarlony_db_user:4QMlMiSbaVgGOI0v@cluster0.m4tjofp.mongodb.net/"
 
-// CORS - Allow all origins explicitly
+// CORS - Allow all origins explicitly (NO RESTRICTIONS)
 app.use((req, res, next) => {
+  // Set all CORS headers to allow everything
   res.header('Access-Control-Allow-Origin', '*')
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization')
-  res.header('Access-Control-Expose-Headers', 'Authorization')
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD')
+  res.header('Access-Control-Allow-Headers', '*') // Allow all headers
+  res.header('Access-Control-Expose-Headers', '*') // Expose all headers
+  res.header('Access-Control-Max-Age', '86400') // Cache preflight for 24 hours
+  res.header('Access-Control-Allow-Credentials', 'true')
   
-  // Handle preflight requests
+  // Handle preflight requests immediately
   if (req.method === 'OPTIONS') {
-    return res.sendStatus(200)
+    return res.status(200).end()
   }
+  
   next()
 })
 
