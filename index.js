@@ -278,7 +278,7 @@ app.post('/api/cv', auth, async (req, res) => {
 })
 
 // PawaPay API configuration
-const PAWAPAY_API_TOKEN = "eyJraWQiOiIxIiwiYWxnIjoiRVMyNTYifQ.eyJ0dCI6IkFBVCIsInN1YiI6IjE4NzUiLCJtYXYiOiIxIiwiZXhwIjoyMDgyMjkzMzU3LCJpYXQiOjE3NjY3NjA1NTcsInBtIjoiREFGLFBBRiIsImp0aSI6IjhjZmVhMWIwLWU1YzctNGQ3Mi1iYzVmLWRmMTNmYTVmMWU5MCJ9.OINT4nV0qzCQ6_iTXxybOEf_uGyhyt-cphbmSRYsI66OPP5vHI_UCmqw2CuJuMvJQmpdnU3DN0-R4XPc53Z2Fg"
+const PAWAPAY_API_TOKEN = process.env.PAWAPAY_API_TOKEN || "eyJraWQiOiIxIiwiYWxnIjoiRVMyNTYifQ.eyJ0dCI6IkFBVCIsInN1YiI6IjE4NzUiLCJtYXYiOiIxIiwiZXhwIjoyMDgyNDc2NzU0LCJpYXQiOjE3NjY5NDM5NTQsInBtIjoiREFGLFBBRiIsImp0aSI6Ijc5YzM2YjM5LWI2YzItNDA5Zi1hY2I2LTM3OWNjYjI1NjYxMSJ9.OdziB-hTpzsUqRVctNf4EPFqfTyWYBAnR7yYr3MgKFYdY6qZqHMYd23yZyDTzT0qMLA7QwVVxsESAqoLGnGX6Q"
 const PAWAPAY_API_URL = "https://api.sandbox.pawapay.io" // Use sandbox for testing
 
 // Create payment request
